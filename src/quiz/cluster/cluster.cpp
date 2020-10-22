@@ -6,6 +6,7 @@
 #include <chrono>
 #include <string>
 #include "kdtree.h"
+#include <vector>
 
 // Arguments:
 // window is the region to draw box around
@@ -13,12 +14,12 @@
 pcl::visualization::PCLVisualizer::Ptr initScene(Box window, int zoom)
 {
 	pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer ("2D Viewer"));
-	viewer->setBackgroundColor (0, 0, 0);
+	viewer->setBackgroundColor (0, 0, 1);
   	viewer->initCameraParameters();
   	viewer->setCameraPosition(0, 0, zoom, 0, 1, 0);
   	viewer->addCoordinateSystem (1.0);
 
-  	viewer->addCube(window.x_min, window.x_max, window.y_min, window.y_max, 0, 0, 1, 1, 1, "window");
+  	viewer->addCube(window.x_min, window.x_max, window.y_min, window.y_max, 0, 0, 0, 0, 0, "window");
   	return viewer;
 }
 
@@ -75,14 +76,48 @@ void render2DTree(Node* node, pcl::visualization::PCLVisualizer::Ptr& viewer, Bo
 
 }
 
-std::vector<std::vector<int>> euclideanCluster(const std::vector<std::vector<float>>& points, KdTree* tree, float distanceTol)
+/* euclideanCluster: Define 2d vector for cluster of indices
+ * Define vector of bool to mask/track processed indices belonging to cluster
+ * if index that is initialized against pointcloud size indexed into vector of bool is marked true as processed then
+ * skip that index of a point otherwise call getProximityCluster
+ * append the cluster_indices returned into cluster_indices vector
+ * getProximityCluster: mark indcies/index as processed(true) in vector of bool upon starting routine
+ * append the index in single_cluster_indices vector
+ * get the nearest points from the kdtree according to the defined threshold
+ * call getProximityCluster recursively on all points this will mark all points as true/processed and form a cluster
+ * */
+
+void getProximityCluster(uint point_index, std::vector<int>& single_cluster_indices, std::vector<bool>& idx_mask, const std::vector<std::vector<float>>& points, std::unique_ptr<KdTree>& kdtree, const float distanceTol)
+{
+    idx_mask[point_index] = true;
+    single_cluster_indices.push_back(point_index);
+
+    std::vector<int> nearest_points_indices = kdtree->search(points[point_index], distanceTol);
+    for (auto idx: nearest_points_indices) //terminating condition of recursion
+    {
+        if(!idx_mask[idx])
+            getProximityCluster(idx, single_cluster_indices, idx_mask, points, kdtree, distanceTol);
+    }
+
+}
+
+std::vector<std::vector<int>> euclideanCluster(const std::vector<std::vector<float>>& points, std::unique_ptr<KdTree>& tree, const float distanceTol)
 {
 
-	// TODO: Fill out this function to return list of indices for each cluster
+	std::vector<std::vector<int>> clusters_indices;
+	std::vector<bool> cluster_index_mask(points.size(), false); //true if point is part of the cluster else false
 
-	std::vector<std::vector<int>> clusters;
- 
-	return clusters;
+	for (uint point_idx{0}; point_idx < points.size(); point_idx++)
+    {
+
+	    if (cluster_index_mask[point_idx])
+            continue;
+        std::vector<int> single_cluster;
+	    getProximityCluster(point_idx, single_cluster, cluster_index_mask, points, tree, distanceTol);
+	    clusters_indices.push_back(single_cluster);
+    }
+
+	return clusters_indices;
 
 }
 
@@ -104,16 +139,17 @@ int main ()
 	//std::vector<std::vector<float>> points = { {-6.2,7}, {-6.3,8.4}, {-5.2,7.1}, {-5.7,6.3} };
 	pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = CreateData(points);
 
-	KdTree* tree = new KdTree;
+//	KdTree* tree = new KdTree;
+	auto tree = std::make_unique<KdTree>();
   
     for (int i=0; i<points.size(); i++) 
-    	tree->insert(points[i],i); 
+    	tree->insert(points[i], i);
 
   	int it = 0;
-  	render2DTree(tree->root,viewer,window, it);
+  	render2DTree(tree->root,viewer, window, it);
   
   	std::cout << "Test Search" << std::endl;
-  	std::vector<int> nearby = tree->search({-6,7},3.0);
+  	std::vector<int> nearby = tree->search({7, 5}, 3.0);
   	for(int index : nearby)
       std::cout << index << ",";
   	std::cout << std::endl;
@@ -129,7 +165,7 @@ int main ()
 
   	// Render clusters
   	int clusterId = 0;
-	std::vector<Color> colors = {Color(1,0,0), Color(0,1,0), Color(0,0,1)};
+	std::vector<Color> colors = {Color(1,0,0), Color(0,1,0), Color(0,1,1)};
   	for(std::vector<int> cluster : clusters)
   	{
   		pcl::PointCloud<pcl::PointXYZ>::Ptr clusterCloud(new pcl::PointCloud<pcl::PointXYZ>());
