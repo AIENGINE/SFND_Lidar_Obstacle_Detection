@@ -9,6 +9,9 @@
 #include "processPointClouds.cpp"
 #include <memory>
 
+#define ENABLE_LIDAR_OBSTACLE_DETECTION_WITH_PCL_BUILTIN 1
+#define ENABLE_LIDAR_OBSTACLE_DETECTION_WITH_UD_ROUTINES 0
+#define ENABLE_SIMPLE_HIGHWAY_SIMULATION 0
 
 std::vector<Car> initHighway(bool renderScene, pcl::visualization::PCLVisualizer::Ptr& viewer)
 {
@@ -36,11 +39,12 @@ std::vector<Car> initHighway(bool renderScene, pcl::visualization::PCLVisualizer
     return cars;
 }
 
+#if ENABLE_LIDAR_OBSTACLE_DETECTION_WITH_UD_ROUTINES
 template<typename PointT>
 void cityBlockUD(pcl::visualization::PCLVisualizer::Ptr& viewer, std::unique_ptr<ProcessPointClouds<PointT>>& process_pointcloud, typename pcl::PointCloud<PointT>::Ptr& traffic_cloud)
 {
-    const Eigen::Vector4f min_vector(-25, -6.5, -2.5, 1);
-    const Eigen::Vector4f max_vector(25, 6.5, 2.5, 1);
+    const Eigen::Vector4f min_vector(-25, -6, -2.5, 1);
+    const Eigen::Vector4f max_vector(25, 6, 2.5, 1);
     auto filtered_cloud = process_pointcloud->FilterCloud(traffic_cloud, 0.2f, min_vector, max_vector);
     auto segmented_pointcloud = process_pointcloud->RansacPlane(filtered_cloud, 100, 0.2);
     renderPointCloud(viewer, segmented_pointcloud.first, "PlaneCloud", Color(1, 0.8, 0.2));
@@ -60,23 +64,22 @@ void cityBlockUD(pcl::visualization::PCLVisualizer::Ptr& viewer, std::unique_ptr
 
         ++clusterId;
     }
-
-
 }
+#endif
 
-
+#if ENABLE_LIDAR_OBSTACLE_DETECTION_WITH_PCL_BUILTIN
 
 template<typename PointT>
 void cityBlock(pcl::visualization::PCLVisualizer::Ptr& viewer, std::unique_ptr<ProcessPointClouds<PointT>>& process_pointcloud, typename pcl::PointCloud<PointT>::Ptr& traffic_cloud)
 {
 //    auto process_pointcloud = std::make_unique<ProcessPointClouds<pcl::PointXYZI>>();
 //    auto traffic_cloud = process_pointcloud->loadPcd("../src/sensors/data/pcd/data_1/0000000000.pcd");
-    auto filtered_cloud = process_pointcloud->FilterCloud(traffic_cloud, 0.09f, Eigen::Vector4f(-25, -6.5, -2.5, 1), Eigen::Vector4f(25, 6.5, 2.5, 1));
+    auto filtered_cloud = process_pointcloud->FilterCloud(traffic_cloud, 0.1f, Eigen::Vector4f(-25, -6.5, -2.5, 1), Eigen::Vector4f(25, 6.5, 2.5, 1));
 //    renderPointCloud(viewer, filtered_cloud, "trafficCloud");
     auto segmented_pointcloud = process_pointcloud->SegmentPlane(filtered_cloud, 100, 0.2);
     renderPointCloud(viewer, segmented_pointcloud.first, "PlaneCloud", Color(1, 0.8, 0.2));
 //    renderPointCloud(viewer, segmented_pointcloud.second, "ObstacleCloud", Color(0, 1, 0));
-    auto obstacle_clusters = process_pointcloud->Clustering(segmented_pointcloud.second, 0.5f, 25, 1500);
+    auto obstacle_clusters = process_pointcloud->Clustering(segmented_pointcloud.second, 0.5f, 25, 1800);
     size_t clusterId, cluster_color {0};
     std::vector<Color> colors = {Color(1,0.6,0.2), Color(0,1,0), Color(0,0,1)};
 
@@ -95,7 +98,10 @@ void cityBlock(pcl::visualization::PCLVisualizer::Ptr& viewer, std::unique_ptr<P
 
 
 }
+#endif
 
+
+#if ENABLE_SIMPLE_HIGHWAY_SIMULATION
 void simpleHighway(pcl::visualization::PCLVisualizer::Ptr& viewer)
 {
     // ----------------------------------------------------
@@ -108,7 +114,7 @@ void simpleHighway(pcl::visualization::PCLVisualizer::Ptr& viewer)
     
     auto ego_lidar = std::make_unique<Lidar>(cars, 0);
     auto traffic_pointcloud = ego_lidar->scan();
-//    renderRays(viewer,  ego_lidar->position, traffic_pointcloud);
+    renderRays(viewer,  ego_lidar->position, traffic_pointcloud);
     renderPointCloud(viewer, traffic_pointcloud, "lidar scatter");
     auto process_pointcloud = std::make_unique<ProcessPointClouds<pcl::PointXYZ>>();
     auto segmented_pointcloud = process_pointcloud->SegmentPlane(traffic_pointcloud, 100, 0.2);
@@ -129,7 +135,7 @@ void simpleHighway(pcl::visualization::PCLVisualizer::Ptr& viewer)
         ++clusterId;
     }
 }
-
+#endif
 
 //setAngle: SWITCH CAMERA ANGLE {XY, TopDown, Side, FPS}
 void initCamera(CameraAngle setAngle, pcl::visualization::PCLVisualizer::Ptr& viewer)
@@ -159,11 +165,13 @@ int main (int argc, char** argv)
 {
     std::cout << "starting enviroment" << std::endl;
 
-    auto point_processor = std::unique_ptr<ProcessPointClouds<pcl::PointXYZI>>();
     pcl::visualization::PCLVisualizer::Ptr viewer (new pcl::visualization::PCLVisualizer ("3D Viewer"));
     CameraAngle setAngle = XY;
     initCamera(setAngle, viewer);
-//    simpleHighway(viewer);
+#if ENABLE_SIMPLE_HIGHWAY_SIMULATION
+    simpleHighway(viewer);
+#endif
+    auto point_processor = std::unique_ptr<ProcessPointClouds<pcl::PointXYZI>>();
     std::vector<boost::filesystem::path> pcl_stream = point_processor->streamPcd("../src/sensors/data/pcd/data_1");
     auto pcl_stream_iter = pcl_stream.begin();
     auto cloud = std::make_shared<pcl::PointCloud<pcl::PointXYZI>>();
@@ -177,24 +185,28 @@ int main (int argc, char** argv)
 
     auto cloud_frames_iter = cloud_frames.begin();
 
-//    cityBlock(viewer);
+
 
     while (!viewer->wasStopped ())
     {
+#if ENABLE_LIDAR_OBSTACLE_DETECTION_WITH_PCL_BUILTIN
         viewer->removeAllPointClouds();
         viewer->removeAllShapes();
-
         cloud = point_processor->loadPcd((*pcl_stream_iter).string());
-
-//        cityBlock<pcl::PointXYZI> (viewer, point_processor, cloud);
-        cityBlockUD<pcl::PointXYZI> (viewer, point_processor, cloud);
-//        cloud_frames_iter++;
-//        if(cloud_frames_iter == cloud_frames.end())
-//            cloud_frames_iter = cloud_frames.begin();
+        cityBlock<pcl::PointXYZI> (viewer, point_processor, cloud);
         pcl_stream_iter++;
         if(pcl_stream_iter == pcl_stream.end())
             pcl_stream_iter = pcl_stream.begin();
+#endif
 
+#if ENABLE_LIDAR_OBSTACLE_DETECTION_WITH_UD_ROUTINES
+        viewer->removeAllPointClouds();
+        viewer->removeAllShapes();
+        cityBlockUD<pcl::PointXYZI> (viewer, point_processor, *cloud_frames_iter);
+        cloud_frames_iter++;
+        if(cloud_frames_iter == cloud_frames.end())
+            cloud_frames_iter = cloud_frames.begin();
+#endif
         viewer->spinOnce ();
     } 
 }
